@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events';
 import * as puppeteer from 'puppeteer';
 import * as cheerio from 'cheerio';
 import { JSDOM } from 'jsdom';
@@ -37,7 +38,23 @@ async function parseTweets(page: puppeteer.Page): Promise<Tweet[]> {
 }
 
 export async function scrape(url: string, auth_token: string) {
-  console.log(url)
+  const sqlite3 = require('sqlite3').verbose();
+
+  const db = new sqlite3.Database('tweets.db', (err:Error) => {
+    if (err) {
+      console.error(err.message);
+    }
+    console.log('Connected to the SQLite database.');
+  });
+
+  db.run(`CREATE TABLE IF NOT EXISTS tweets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT,
+    text TEXT,
+    date TEXT,
+    url TEXT
+  )`);
+
   const browser = await puppeteer.launch({
     headless: false,
     executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -62,7 +79,7 @@ export async function scrape(url: string, auth_token: string) {
   });
 
   await page.goto(url);
-  await new Promise(resolve => setTimeout(resolve, 10000));
+  await new Promise(resolve => setTimeout(resolve, 100000));
 
   const tweets = await parseTweets(page);
 
@@ -76,4 +93,27 @@ export async function scrape(url: string, auth_token: string) {
   });
 
   await browser.close();
+
+  tweets.forEach(tweet => {
+    // Check if the URL already exists in the database
+    db.get(`SELECT url FROM tweets WHERE url = ?`, [tweet.url], (err: Error, row: any) => {
+      if (err) {
+        return console.error(err.message);
+      }
+      if (row) {
+        console.log(`Tweet with URL ${tweet.url} already exists.`);
+      } else {
+        // If the URL does not exist, insert the new tweet
+        db.run(`INSERT INTO tweets (username, text, date, url) VALUES (?, ?, ?, ?)`, [tweet.username, tweet.text, tweet.date, tweet.url], (insertErr: Error) => {
+          if (insertErr) {
+            return console.error(insertErr.message);
+          }
+          console.log('A new tweet has been inserted');
+        });
+      }
+    });
+  });
+
+  return tweets
+
 }
