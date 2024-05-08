@@ -37,6 +37,7 @@
     "@tauri-apps/api": "^1.5.3",
     "ai": "^3.0.19",
     "axios": "^1.6.8",
+    "better-sqlite3": "^9.6.0",
     "cheerio": "1.0.0-rc.12",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",

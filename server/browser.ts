@@ -4,6 +4,23 @@ import { JSDOM } from 'jsdom';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import formBody from '@fastify/formbody';
+import Database from 'better-sqlite3';
+
+const scraping: boolean = false;
+// Open a new database connection
+const db = new Database('twitterScraper.db');
+
+// Create the 'tweets' table if it doesn't exist
+db.exec(`
+  CREATE TABLE IF NOT EXISTS tweets (
+    username TEXT, 
+    text TEXT, 
+    date TEXT, 
+    url TEXT PRIMARY KEY
+  )
+`);
+
+console.log("Database initialized.");
 
 interface Tweet {
   username: string;
@@ -11,43 +28,10 @@ interface Tweet {
   date: string;
   url: string;
 }
-const { Readability } = require('@mozilla/readability');
 
-async function summarizeTweets(tweets: Tweet[], apikey: string, baseurl?: string, model?: string, prompt?: string): Promise<string> {
-
-  const promptText = prompt || '将以上推文用中文总结成要点并附上相关链接';
-  // Create a summary prompt from the tweets
-  const promptFull = tweets.map(tweet => `${tweet.username}: ${tweet.text} (source: ${tweet.url})`).join('\n\n') + `\n\n${promptText}`;
-  const url= baseurl || 'https://api.openai.com/v1';
-  const response = await fetch(url+ '/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apikey}`
-    },
-    body: JSON.stringify({
-      'model': model || 'gpt-3.5-turbo-0125',
-      'messages': [
-        {
-          'role': 'user',
-          'content': promptFull
-        }
-      ],
-      'temperature': 0.7
-    })
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP error! Status: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const chatData = data.choices[0]?.message?.content || '';
-  return chatData;
-}
-
-async function parseTweets(page: puppeteer.Page): Promise<Tweet[]> {
-  const html = await page.content();
-  const $ = cheerio.load(html);
+async function scrapeXlist(url: string, auth_token: string, openAIKey: string, openAIBase: string, browserPath: string, model?: string, proxyURL?: string, prompt?: string) {
+  const twitterHtml =  await scrape(url, auth_token, openAIKey, openAIBase, browserPath, model, proxyURL, prompt);
+  const $ = cheerio.load(twitterHtml);
 
   const tweets: Tweet[] = [];
 
@@ -57,17 +41,20 @@ async function parseTweets(page: puppeteer.Page): Promise<Tweet[]> {
     const tweetHtml = $element.html();
     const $time = $element.find('time');
     const dom = new JSDOM(tweetHtml || '');
-    const reader = new Readability(dom.window._document);
-    const article = reader.parse();
 
     tweets.push({
       username: $username.text(),
-      text: article.textContent.trim(),
+      text: dom.textContent.trim(),
       date: $element.find('time').attr('datetime') || '',
       url: `https://twitter.com${$time.parent().attr('href') || ''}`,
     });
   });
 
+  for (const tweet of tweets) {
+    await db.run(`INSERT INTO tweets (username, text, date, url) VALUES (?, ?, ?, ?)`, [tweet.username, tweet.text, tweet.date, tweet.url]);
+  }
+
+  console.log('Tweets:', tweets.map(tweet => tweet.username + '\n' + tweet.url + '\n' + tweet.text).join('\n'));
   return tweets;
 }
 
@@ -102,13 +89,8 @@ async function scrape(url: string, auth_token: string, openAIKey: string, openAI
 
   await page.goto(url);
   await new Promise(resolve => setTimeout(resolve, 10000));
-
-  const tweets = await parseTweets(page);
-  console.log('Tweets:', tweets.map(tweet => tweet.username + '\n' + tweet.url + '\n' + tweet.text).join('\n'));
-
-  await browser.close();
-  const summary = await summarizeTweets(tweets, openAIKey, openAIBase, model, prompt)
-  return summary;
+  const html = await page.content();
+  return html
 }
 
 const fastify = Fastify({
@@ -153,13 +135,9 @@ fastify.get('/', async (request, reply) => {
 });
 
 fastify.post('/scrape', async (request, reply) => {
-  try {
     const { authToken, openAIKey, openAIBase, browserPath, twitterListURL, model, proxyURL } = request.body as any;
-    const summary = await scrape(twitterListURL, authToken, openAIKey, openAIBase, browserPath, model, proxyURL);
-    reply.type('text/plain; charset=utf-8').send(summary);
-  } catch (error) {
-    reply.send({ error: error.toString() });
-  }
+    reply.type('text/plain; charset=utf-8').send('scraping');
+    await scrapeXlist(twitterListURL, authToken, openAIKey, openAIBase, browserPath, model, proxyURL);
 });
 
 fastify.listen({ port: 7540 }, (err, address) => {
