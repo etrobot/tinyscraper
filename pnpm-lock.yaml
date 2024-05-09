@@ -205,6 +205,9 @@ devDependencies:
   '@tauri-apps/cli':
     specifier: ^1.5.11
     version: 1.5.11
+  '@types/better-sqlite3':
+    specifier: ^7.6.10
+    version: 7.6.10
   '@types/d3-scale':
     specifier: ^4.0.8
     version: 4.0.8
@@ -2431,6 +2434,12 @@ packages:
   /@tootallnate/quickjs-emscripten@0.23.0:
     resolution: {integrity: sha512-C5Mc6rdnsaJDjO3UpGW/CQTHtCKaYlScZTly4JIu97Jxo/odCiH0ITnDXSJPTOrEKk/ycSZ0AOgTmkDtkOsvIA==}
     dev: false
+
+  /@types/better-sqlite3@7.6.10:
+    resolution: {integrity: sha512-TZBjD+yOsyrUJGmcUj6OS3JADk3+UZcNv3NOBqGkM09bZdi28fNZw8ODqbMOLfKCu7RYCO62/ldq1iHbzxqoPw==}
+    dependencies:
+      '@types/node': 20.12.5
+    dev: true
 
   /@types/d3-scale@4.0.8:
     resolution: {integrity: sha512-gkK1VVTr5iNiYJ7vWDI+yUFFlszhNMtVeneJ6lUTKPjprsvLLI9/tgEGiXJOnlINJA8FyA88gfnQsHbybVZrYQ==}

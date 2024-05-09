@@ -6,7 +6,7 @@ import cors from '@fastify/cors';
 import formBody from '@fastify/formbody';
 import Database from 'better-sqlite3';
 
-const scraping: boolean = false;
+var scraping: boolean = false;
 // Open a new database connection
 const db = new Database('twitterScraper.db');
 
@@ -30,6 +30,7 @@ interface Tweet {
 }
 
 async function scrapeXlist(url: string, auth_token: string, openAIKey: string, openAIBase: string, browserPath: string, model?: string, proxyURL?: string, prompt?: string) {
+  scraping = true;
   const twitterHtml =  await scrape(url, auth_token, openAIKey, openAIBase, browserPath, model, proxyURL, prompt);
   const $ = cheerio.load(twitterHtml);
 
@@ -44,17 +45,42 @@ async function scrapeXlist(url: string, auth_token: string, openAIKey: string, o
 
     tweets.push({
       username: $username.text(),
-      text: dom.textContent.trim(),
+      text: dom.window.document.body?.textContent?.trim() || '',
       date: $element.find('time').attr('datetime') || '',
       url: `https://twitter.com${$time.parent().attr('href') || ''}`,
     });
   });
 
-  for (const tweet of tweets) {
-    await db.run(`INSERT INTO tweets (username, text, date, url) VALUES (?, ?, ?, ?)`, [tweet.username, tweet.text, tweet.date, tweet.url]);
+  for (let tweet of tweets) {
+    const detailHtml = await scrape(tweet.url, auth_token, openAIKey, openAIBase, browserPath, model, proxyURL, prompt);
+    const $detail = cheerio.load(detailHtml);
+    
+    let spanWithEllipsis = $detail('span').filter(function() {
+      let text = $detail(this).text();
+      return text.endsWith('...');
+    });
+    
+    if (spanWithEllipsis.length <= 0) {
+      continue;
+    }
+    
+    tweet.text = $detail('.tweet-text').text();
   }
 
-  console.log('Tweets:', tweets.map(tweet => tweet.username + '\n' + tweet.url + '\n' + tweet.text).join('\n'));
+  const insert = db.prepare(
+    `INSERT OR REPLACE INTO tweets (username, text, date, url) VALUES (@username, @text, @date, @url)`
+  );
+
+  const insertMany = db.transaction((tweets: Tweet[]) => {
+    for (const tweet of tweets) {
+      insert.run(tweet);
+    }
+  });
+
+  insertMany(tweets);
+
+  // console.log('Tweets:', tweets.map(tweet => tweet.username + '\n' + tweet.url + '\n' + tweet.text).join('\n'));
+  scraping = false;
   return tweets;
 }
 
@@ -90,6 +116,7 @@ async function scrape(url: string, auth_token: string, openAIKey: string, openAI
   await page.goto(url);
   await new Promise(resolve => setTimeout(resolve, 10000));
   const html = await page.content();
+  await browser.close();
   return html
 }
 
@@ -136,9 +163,20 @@ fastify.get('/', async (request, reply) => {
 
 fastify.post('/scrape', async (request, reply) => {
     const { authToken, openAIKey, openAIBase, browserPath, twitterListURL, model, proxyURL } = request.body as any;
-    reply.type('text/plain; charset=utf-8').send('scraping');
-    await scrapeXlist(twitterListURL, authToken, openAIKey, openAIBase, browserPath, model, proxyURL);
+    if(!scraping){
+      reply.type('text/plain; charset=utf-8').send('scraping');
+      await scrapeXlist(twitterListURL, authToken, openAIKey, openAIBase, browserPath, model, proxyURL);
+    }else{
+      reply.type('text/plain; charset=utf-8').send('Already scraping');
+    }
 });
+
+fastify.get('/tweets', async (request, reply) => {
+  const query = db.prepare('SELECT * FROM tweets');
+  const result = await query.all();
+  console.log(result);
+  reply.type('text/plain; charset=utf-8').send(JSON.stringify(result));
+})
 
 fastify.listen({ port: 7540 }, (err, address) => {
   if (err) {
